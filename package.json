@@ -1,0 +1,10 @@
+{
+  "name": "tg-game-durak",
+  "private": true,
+  "packageManager": "pnpm@9",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "dev": "echo \"Use per-package dev scripts (server/webapp)\""
+  }
+}

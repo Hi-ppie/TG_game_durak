@@ -1,0 +1,14 @@
+{
+  "name": "server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "echo \"(добавим серверный dev позже)\"",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
