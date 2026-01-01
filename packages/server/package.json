@@ -4,11 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "dev": "echo \"(добавим серверный dev позже)\"",
     "start": "node dist/index.js"
   },
+  "dependencies": {
+    "fastify": "^4.27.2"
+  },
   "devDependencies": {
+    "tsx": "^4.0.0",
     "typescript": "^5.6.3"
   }
 }
