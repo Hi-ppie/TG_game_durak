@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 
 type Suit = '♠' | '♥' | '♦' | '♣';
 type Rank = '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K' | 'A';
@@ -19,37 +19,116 @@ type GameState = {
     message?: string;
 };
 
+const RANK_ORDER: Record<Rank, number> = {
+    '6': 0, '7': 1, '8': 2, '9': 3, '10': 4, 'J': 5, 'Q': 6, 'K': 7, 'A': 8,
+};
+function isTrump(card: Card, trump: Suit) { return card.suit === trump; }
+function canBeat(attack: Card, defend: Card, trump: Suit) {
+    if (attack.suit === defend.suit) return RANK_ORDER[defend.rank] > RANK_ORDER[attack.rank];
+    if (isTrump(defend, trump) && !isTrump(attack, trump)) return true;
+    return false;
+}
+function ranksOnTable(state: GameState): Set<Rank> {
+    const set = new Set<Rank>();
+    for (const s of state.table) { set.add(s.attack.rank); if (s.defend) set.add(s.defend.rank); }
+    return set;
+}
+
 export function App() {
     const wsRef = useRef<WebSocket | null>(null);
     const [you, setYou] = useState<string | null>(null);
     const [state, setState] = useState<GameState | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
+    const [wsUrl, setWsUrl] = useState<string>('ws://localhost:8080');
 
-    useEffect(() => {
-        const ws = new WebSocket('ws://localhost:8080');
-        wsRef.current = ws;
-        ws.onopen = () => {
-            ws.send(JSON.stringify({ type: 'hello' }));
-        };
-        ws.onmessage = (ev) => {
-            const data = JSON.parse(ev.data);
-            if (data.type === 'hello') {
-                setYou(data.you);
-            } else if (data.type === 'state') {
-                setYou(data.you);
-                setState(data.state);
-                setError(null);
-            } else if (data.type === 'error') {
-                setError(data.message);
-            }
-        };
-        ws.onclose = () => {};
-        ws.onerror = (err) => console.error('[webapp] ws error:', err);
-        return () => ws.close();
+    // Порядок выбора порта: ?ws=..., VITE_WS_PORT, затем запасные порты
+    const ports = useMemo(() => {
+        const param = new URLSearchParams(location.search).get('ws');
+        const envPort = import.meta.env.VITE_WS_PORT as string | undefined;
+        const list: string[] = [];
+        if (param) list.push(param);
+        if (envPort) list.push(envPort);
+        // запасные порты (можешь отредактировать по своему окружению)
+        list.push('8080', '8081');
+        // удалим дубликаты, сохраняя порядок
+        return Array.from(new Set(list));
     }, []);
 
+    useEffect(() => {
+        let closed = false;
+
+        const tryConnect = (idx: number) => {
+            if (closed) return;
+            if (idx >= ports.length) {
+                setWsStatus('error');
+                return;
+            }
+            const port = ports[idx];
+            const url = `ws://${location.hostname}:${port}`;
+            setWsUrl(url);
+            setWsStatus('connecting');
+
+            const ws = new WebSocket(url);
+            wsRef.current = ws;
+
+            ws.onopen = () => {
+                setWsStatus('open');
+                ws.send(JSON.stringify({ type: 'hello' }));
+            };
+            ws.onmessage = (ev) => {
+                try {
+                    const data = JSON.parse(ev.data);
+                    if (data.type === 'hello') {
+                        setYou(data.you);
+                    } else if (data.type === 'state') {
+                        setYou(data.you);
+                        setState(data.state);
+                        setError(null);
+                    } else if (data.type === 'error') {
+                        setError(data.message);
+                    }
+                } catch {
+                    // ignore non-JSON
+                }
+            };
+            ws.onerror = () => {
+                // Переходим к следующему порту
+                ws.close();
+                tryConnect(idx + 1);
+            };
+            ws.onclose = () => {
+                if (!closed) setWsStatus('closed');
+            };
+        };
+
+        tryConnect(0);
+
+        return () => {
+            closed = true;
+            wsRef.current?.close();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ports.join(',')]);
+
     if (!state) {
-        return <div style={{ padding: 16 }}>Подключаемся...</div>;
+        return (
+            <div className="app">
+                <div className="panel">
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <div>Подключаемся...</div>
+                        <div style={{ fontSize: 12, color: '#666' }}>
+                            WS: {wsUrl} · статус: {wsStatus}
+                        </div>
+                    </div>
+                    {error && (
+                        <div className="panel" style={{ marginTop: 12, background: '#ffe3e3', borderColor: '#ffb3b3', color: '#7a2222' }}>
+                            Ошибка: {error}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
     }
 
     const meIdx = state.players.findIndex((p) => p.id === you);
@@ -60,22 +139,41 @@ export function App() {
     const isMyTurnAttack = state.phase === 'attack' && state.attacker === meIdx;
     const isMyTurnDefend = state.phase === 'defend' && state.defender === meIdx;
 
+    const attackAllowedRanks = useMemo(() => {
+        if (state.table.length === 0) return null;
+        return ranksOnTable(state);
+    }, [state]);
+    const openAttackIdx = useMemo(() => state.table.findIndex((s) => !s.defend), [state.table]);
+    const defenseAllowedByIndex = useMemo(() => {
+        if (openAttackIdx < 0) return () => false;
+        const attackCard = state.table[openAttackIdx].attack;
+        return (card: Card) => canBeat(attackCard, card, state.trumpSuit);
+    }, [openAttackIdx, state.table, state.trumpSuit]);
+
     const sendAction = (action: any) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== ws.OPEN) return;
         ws.send(JSON.stringify({ type: 'action', action }));
     };
 
+    const cardClickable = (card: Card): boolean => {
+        if (state.phase === 'finished') return false;
+        if (isMyTurnAttack) {
+            if (!attackAllowedRanks) return true;
+            return attackAllowedRanks.has(card.rank);
+        } else if (isMyTurnDefend) {
+            if (openAttackIdx < 0) return false;
+            return defenseAllowedByIndex(card);
+        }
+        return false;
+    };
+
     const onCardClick = (card: Card) => {
-        if (state.phase === 'finished') return;
+        if (!cardClickable(card)) return;
         if (isMyTurnAttack) {
             sendAction({ kind: 'attack', card });
         } else if (isMyTurnDefend) {
-            // Защищаем первую непокрытую атаку
-            const idx = state.table.findIndex((s) => !s.defend);
-            if (idx >= 0) {
-                sendAction({ kind: 'defend', attackIndex: idx, card });
-            }
+            sendAction({ kind: 'defend', attackIndex: openAttackIdx, card });
         }
     };
 
@@ -86,91 +184,129 @@ export function App() {
     const deckCount = state.deck.length;
 
     return (
-        <div style={{ maxWidth: 900, margin: '24px auto', fontFamily: 'system-ui' }}>
-            <h1>Durak Local</h1>
-            <p>
-                Козырь: <b>{trump}</b> · В колоде: {deckCount} · Фаза: {state.phase}{' '}
-                · Ходит: {state.players[state.attacker].name}
-            </p>
-            {state.message && <p style={{ color: '#666' }}>{state.message}</p>}
-            {error && <p style={{ color: 'crimson' }}>Ошибка: {error}</p>}
-            {state.winnerId && <p>Победитель: {state.winnerId === me.id ? 'Вы' : 'Бот'}</p>}
+        <div className="app">
+            <div className="panel header">
+                <h1 style={{ margin: 0 }}>Durak Local</h1>
+                <div className="status">
+                    <span className="badge">WS: {wsUrl}</span>
+                    <span className="badge">Козырь: <b>{trump}</b></span>
+                    <span className="badge">В колоде: {deckCount}</span>
+                    <span className="badge">Фаза: {state.phase}</span>
+                    <span className="badge">Ходит: {state.players[state.attacker].name}</span>
+                </div>
+            </div>
 
-            <section style={{ marginTop: 16 }}>
-                <h3>Стол</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {state.message && (
+                <div className="panel" style={{ marginTop: 12, background: '#fffbe6', borderColor: '#ffe58f' }}>
+                    {state.message}
+                </div>
+            )}
+            {error && (
+                <div className="panel" style={{ marginTop: 12, background: '#ffe3e3', borderColor: '#ffb3b3', color: '#7a2222' }}>
+                    Ошибка: {error}
+                </div>
+            )}
+            {state.winnerId && (
+                <div className="panel" style={{ marginTop: 12, background: '#e6ffed', borderColor: '#abf5b5', color: '#1a7f37' }}>
+                    Победитель: {state.winnerId === me.id ? 'Вы' : 'Бот'}
+                </div>
+            )}
+
+            <div className="panel" style={{ marginTop: 12 }}>
+                <div className="deck-area">
+                    <div className="deck-stack">
+                        <div className="deck-count">{deckCount}</div>
+                    </div>
+                    <div className="trump-holder">
+                        <CardView card={state.trumpCard} trump={trump} clickable={false} />
+                    </div>
+                </div>
+            </div>
+
+            <div className="panel" style={{ marginTop: 12 }}>
+                <h3 className="section-title">Стол</h3>
+                <div className="table">
                     {state.table.map((slot, i) => (
-                        <div key={i} style={{ border: '1px solid #ccc', padding: 8 }}>
-                            <div>Атака: <CardView card={slot.attack} trump={trump} /></div>
-                            <div>Защита: {slot.defend ? <CardView card={slot.defend} trump={trump} /> : '—'}</div>
+                        <div key={i} className="slot">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span>Атака:</span>
+                                <CardView card={slot.attack} trump={trump} clickable={false} />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                                <span>Защита:</span>
+                                {slot.defend ? (
+                                    <CardView card={slot.defend} trump={trump} clickable={false} />
+                                ) : (
+                                    <span>—</span>
+                                )}
+                            </div>
                         </div>
                     ))}
-                    {state.table.length === 0 && <div>Стол пуст</div>}
+                    {state.table.length === 0 && <div className="slot">Стол пуст</div>}
                 </div>
-            </section>
+            </div>
 
-            <section style={{ marginTop: 16 }}>
-                <h3>Ваша рука ({me.hand.length})</h3>
-                <HandView hand={me.hand} trump={trump} onClick={onCardClick} clickable={isMyTurnAttack || isMyTurnDefend} />
-            </section>
+            <div className="panel" style={{ marginTop: 12 }}>
+                <h3 className="section-title">Ваша рука ({me.hand.length})</h3>
+                <div className="hand">
+                    {me.hand.map((c, idx) => (
+                        <CardView
+                            key={idx}
+                            card={c}
+                            trump={trump}
+                            clickable={cardClickable(c)}
+                            onClick={() => onCardClick(c)}
+                        />
+                    ))}
+                </div>
+            </div>
 
-            <section style={{ marginTop: 16 }}>
-                <h3>Рука оппонента ({opp.hand.length})</h3>
-                {/* Для теста показываем карты бота. В реальной игре скрываем. */}
-                <HandView hand={opp.hand} trump={trump} onClick={() => {}} clickable={false} />
-            </section>
+            <div className="panel" style={{ marginTop: 12 }}>
+                <h3 className="section-title">Рука оппонента ({opp.hand.length})</h3>
+                <div className="hand">
+                    {opp.hand.map((c, idx) => (
+                        <CardView key={idx} card={c} trump={trump} clickable={false} />
+                    ))}
+                </div>
+            </div>
 
-            <section style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+            <div className="panel actions" style={{ marginTop: 12 }}>
                 <button onClick={take} disabled={!isMyTurnDefend || state.phase === 'finished'}>Взять</button>
                 <button onClick={done} disabled={!isMyTurnAttack || state.phase === 'finished'}>Завершить ход</button>
-            </section>
+            </div>
         </div>
     );
 }
 
-function CardView({ card, trump }: { card: Card; trump: Suit }) {
-    const isTrump = card.suit === trump;
-    return (
-        <span
-            style={{
-                display: 'inline-block',
-                padding: '6px 8px',
-                border: '1px solid #999',
-                borderRadius: 4,
-                background: isTrump ? '#ffe9a8' : '#f5f5f5',
-                minWidth: 44,
-                textAlign: 'center',
-            }}
-            title={isTrump ? 'Козырь' : ''}
-        >
-      {card.rank} {card.suit}
-    </span>
-    );
-}
-
-function HandView({
-                      hand,
+function CardView({
+                      card,
                       trump,
-                      onClick,
                       clickable,
+                      onClick,
                   }: {
-    hand: Card[];
+    card: Card;
     trump: Suit;
-    onClick: (c: Card) => void;
     clickable: boolean;
+    onClick?: () => void;
 }) {
+    const red = card.suit === '♥' || card.suit === '♦';
+    const isT = card.suit === trump;
+    const color = red ? 'var(--red)' : 'var(--black)';
+    const className = [
+        'card',
+        isT ? 'trump' : '',
+        clickable ? 'clickable' : 'disabled',
+    ].join(' ').trim();
+
     return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {hand.map((c, idx) => (
-                <button
-                    key={idx}
-                    onClick={() => onClick(c)}
-                    disabled={!clickable}
-                    style={{ cursor: clickable ? 'pointer' : 'default', background: 'transparent', border: 'none', padding: 0 }}
-                >
-                    <CardView card={c} trump={trump} />
-                </button>
-            ))}
+        <div className={className} onClick={clickable ? onClick : undefined}>
+            <div className="corner tl" style={{ color }}>
+                {card.rank} {card.suit}
+            </div>
+            <div className="pip" style={{ color }}>{card.suit}</div>
+            <div className="corner br" style={{ color }}>
+                {card.rank} {card.suit}
+            </div>
         </div>
     );
 }

@@ -29,24 +29,9 @@ const room: Room = {
     botId: null,
 };
 
-function broadcast(payload: unknown) {
-    const data = JSON.stringify(payload);
-    for (const { ws } of room.clients.values()) {
-        if (ws.readyState === ws.OPEN) ws.send(data);
-    }
-}
-
 function sendTo(clientId: string, payload: unknown) {
     const c = room.clients.get(clientId);
     if (c && c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(payload));
-}
-
-function ensureGameStarted(humanId: string) {
-    if (!room.botId) room.botId = 'bot-' + Math.random().toString(36).slice(2);
-    if (!room.state) {
-        room.state = startGame(humanId, room.botId);
-        console.log('[server] Game started. Trump:', room.state.trumpSuit);
-    }
 }
 
 function publishState() {
@@ -54,6 +39,14 @@ function publishState() {
     const state = room.state;
     for (const clientId of room.clients.keys()) {
         sendTo(clientId, { type: 'state', you: clientId, state });
+    }
+}
+
+function ensureGameStarted(humanId: string) {
+    if (!room.botId) room.botId = 'bot-' + Math.random().toString(36).slice(2);
+    if (!room.state) {
+        room.state = startGame(humanId, room.botId);
+        console.log('[server] Game started. Trump:', room.state.trumpSuit);
     }
 }
 
@@ -79,17 +72,15 @@ wss.on('connection', (ws) => {
     room.clients.set(id, { id, ws });
     console.log(`[server] Client connected: ${id}`);
 
+    // Сразу стартуем игру и публикуем состояние
+    room.humanId ??= id;
+    ensureGameStarted(room.humanId);
+    sendTo(id, { type: 'hello', you: id });
+    publishState();
+
     ws.on('message', (raw) => {
         let msg: any;
         try { msg = JSON.parse(String(raw)); } catch { return; }
-
-        if (msg?.type === 'hello') {
-            room.humanId ??= id;
-            ensureGameStarted(room.humanId);
-            sendTo(id, { type: 'hello', you: id });
-            publishState();
-            return;
-        }
 
         if (msg?.type === 'action') {
             if (!room.state) return;
@@ -110,6 +101,4 @@ wss.on('connection', (ws) => {
         room.clients.delete(id);
         console.log(`[server] Client disconnected: ${id}`);
     });
-
-    sendTo(id, { type: 'welcome', id });
 });
