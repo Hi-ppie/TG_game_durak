@@ -4,15 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "fastify": "^4.27.2"
+    "@durak/engine": "workspace:*",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "tsx": "^4.0.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "@types/ws": "^8.5.10"
   }
 }
