@@ -40,76 +40,42 @@ export function App() {
     const [state, setState] = useState<GameState | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
-    const [wsUrl, setWsUrl] = useState<string>('ws://localhost:8080');
+    const [wsUrl, setWsUrl] = useState<string>('');
 
-    // Порядок выбора порта: ?ws=..., VITE_WS_PORT, затем запасные порты
-    const ports = useMemo(() => {
-        const param = new URLSearchParams(location.search).get('ws');
-        const envPort = import.meta.env.VITE_WS_PORT as string | undefined;
-        const list: string[] = [];
-        if (param) list.push(param);
-        if (envPort) list.push(envPort);
-        // запасные порты (можешь отредактировать по своему окружению)
-        list.push('8080', '8081');
-        // удалим дубликаты, сохраняя порядок
-        return Array.from(new Set(list));
-    }, []);
+    const PORT = String(import.meta.env.VITE_WS_PORT ?? '8080');
+    const URL = `ws://${location.hostname}:${PORT}`;
 
     useEffect(() => {
-        let closed = false;
+        setWsUrl(URL);
+        setWsStatus('connecting');
 
-        const tryConnect = (idx: number) => {
-            if (closed) return;
-            if (idx >= ports.length) {
-                setWsStatus('error');
-                return;
-            }
-            const port = ports[idx];
-            const url = `ws://${location.hostname}:${port}`;
-            setWsUrl(url);
-            setWsStatus('connecting');
+        const ws = new WebSocket(URL);
+        wsRef.current = ws;
 
-            const ws = new WebSocket(url);
-            wsRef.current = ws;
-
-            ws.onopen = () => {
-                setWsStatus('open');
-                ws.send(JSON.stringify({ type: 'hello' }));
-            };
-            ws.onmessage = (ev) => {
-                try {
-                    const data = JSON.parse(ev.data);
-                    if (data.type === 'hello') {
-                        setYou(data.you);
-                    } else if (data.type === 'state') {
-                        setYou(data.you);
-                        setState(data.state);
-                        setError(null);
-                    } else if (data.type === 'error') {
-                        setError(data.message);
-                    }
-                } catch {
-                    // ignore non-JSON
+        ws.onopen = () => {
+            setWsStatus('open');
+            ws.send(JSON.stringify({ type: 'hello' }));
+        };
+        ws.onmessage = (ev) => {
+            try {
+                const data = JSON.parse(ev.data);
+                if (data.type === 'hello') {
+                    setYou(data.you);
+                } else if (data.type === 'state') {
+                    setYou(data.you);
+                    setState(data.state);
+                    setError(null);
+                } else if (data.type === 'error') {
+                    setError(data.message);
                 }
-            };
-            ws.onerror = () => {
-                // Переходим к следующему порту
-                ws.close();
-                tryConnect(idx + 1);
-            };
-            ws.onclose = () => {
-                if (!closed) setWsStatus('closed');
-            };
+            } catch { /* ignore non-JSON */ }
         };
+        ws.onerror = () => setWsStatus('error');
+        ws.onclose = () => setWsStatus('closed');
 
-        tryConnect(0);
-
-        return () => {
-            closed = true;
-            wsRef.current?.close();
-        };
+        return () => ws.close();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ports.join(',')]);
+    }, [URL]);
 
     if (!state) {
         return (

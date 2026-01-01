@@ -5,6 +5,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "dev": "pnpm -r --parallel dev"
+    "dev:init": "pnpm -C packages/engine build",
+    "dev": "pnpm run dev:init && pnpm -r --parallel dev"
   }
 }
