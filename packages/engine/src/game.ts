@@ -22,7 +22,8 @@ export type TableSlot = {
     defend?: Card;
 };
 
-export type Phase = 'attack' | 'defend' | 'cleanup' | 'finished';
+// Добавили фазу 'throw' — докидывание атаки после решения "беру"
+export type Phase = 'attack' | 'defend' | 'throw' | 'finished';
 
 export type GameState = {
     deck: Deck;
@@ -142,8 +143,9 @@ export function ranksOnTable(state: GameState): Set<Rank> {
     return set;
 }
 
+// Атаки разрешены в фазах 'attack' и 'throw'
 export function legalAttacks(state: GameState, playerIndex: number): Card[] {
-    if (state.phase !== 'attack' || playerIndex !== state.attacker) return [];
+    if ((state.phase !== 'attack' && state.phase !== 'throw') || playerIndex !== state.attacker) return [];
     const hand = state.players[playerIndex].hand;
     if (state.table.length === 0) return hand;
     const ranks = ranksOnTable(state);
@@ -178,6 +180,15 @@ function removeCardFromHand(hand: Card[], card: Card): boolean {
     return false;
 }
 
+function moveTableToDefender(state: GameState) {
+    const defender = state.players[state.defender];
+    for (const slot of state.table) {
+        defender.hand.push(slot.attack);
+        if (slot.defend) defender.hand.push(slot.defend);
+    }
+    state.table = [];
+}
+
 // Действия игрока
 export type ActionAttack = { kind: 'attack'; card: Card };
 export type ActionDefend = { kind: 'defend'; attackIndex: number; card: Card };
@@ -204,12 +215,24 @@ export function applyAction(state: GameState, playerId: string, action: Action):
         const allowed = legal.some((c) => c.suit === action.card.suit && c.rank === action.card.rank);
         if (!allowed) return { ok: false, error: 'Этой картой нельзя атаковать сейчас', state };
 
+        // В фазе 'throw' тоже можно атаковать, но с лимитом по руке защитника
+        if (state.phase === 'throw' && !canAddAttack(state)) {
+            return { ok: false, error: 'Докидывать больше нельзя (лимит по руке защитника)', state };
+        }
+
         const ok = removeCardFromHand(state.players[me].hand, action.card);
         if (!ok) return { ok: false, error: 'Карты нет в руке', state };
 
         state.table.push({ attack: action.card });
-        state.phase = 'defend';
-        state.message = 'Атакуйте ещё или ждите защиту';
+
+        // После атаки переходим в защиту, если не фаза 'throw'
+        if (state.phase !== 'throw') {
+            state.phase = 'defend';
+            state.message = 'Атакуйте ещё или ждите защиту';
+        } else {
+            state.phase = 'throw';
+            state.message = 'Докидывайте доступные карты или завершите ход';
+        }
 
         return { ok: true, state: advanceIfNeeded(state) };
     }
@@ -226,7 +249,7 @@ export function applyAction(state: GameState, playerId: string, action: Action):
         state.table[action.attackIndex].defend = action.card;
 
         // Проверим: все ли атаки побиты? Если да — атакующий может добавить (phase снова attack),
-        // но если добавить нечего или игрок нажмёт "done", будет cleanup.
+        // но если добавить нечего или игрок нажмёт "done", будет завершение.
         const allDefended = state.table.every((s) => !!s.defend);
         state.phase = allDefended ? 'attack' : 'defend';
         state.message = allDefended ? 'Можно добавить атаку или завершить ход' : 'Защититесь от оставшихся атак';
@@ -236,50 +259,54 @@ export function applyAction(state: GameState, playerId: string, action: Action):
 
     if (action.kind === 'take') {
         if (me !== state.defender) return { ok: false, error: 'Только защищающийся может взять', state };
-        // Защитник берёт все карты со стола
-        const defender = state.players[state.defender];
-        for (const slot of state.table) {
-            defender.hand.push(slot.attack);
-            if (slot.defend) defender.hand.push(slot.defend);
-        }
-        state.table = [];
-        // Раздача только атакующему, затем защищающему — но защищающий уже взял, раздача по правилам всё равно идёт
-        refillHands(state);
-        // Роль атакующего сохраняется
-        state.phase = 'attack';
-        state.message = 'Защитник взял. Атакуйте снова';
-        // Проверка конца игры
-        checkFinish(state);
+        // Защитник решил взять — переходим в фазу докидывания для атакующего
+        state.phase = 'throw';
+        state.message = 'Защитник берёт. Атакующий может докинуть карты и затем завершить ход';
         return { ok: true, state };
     }
 
     if (action.kind === 'done') {
         if (me !== state.attacker) return { ok: false, error: 'Только атакующий завершает ход', state };
-        // Завершение хода возможно только если все атаки побиты
-        const allDefended = state.table.length > 0 && state.table.every((s) => !!s.defend);
-        if (!allDefended) return { ok: false, error: 'Есть непобитые атаки. Либо добавьте, либо защитник пусть возьмёт', state };
 
-        // Сбросить карты со стола (в отбой)
-        state.table = [];
-        // Раздать карты: сначала атакующему, потом защищающему
-        refillHands(state);
-        // Поменять роли
-        [state.attacker, state.defender] = [state.defender, state.attacker];
-        state.phase = 'attack';
-        state.message = 'Ход завершён. Роли сменились';
-        checkFinish(state);
-        return { ok: true, state };
+        if (state.phase === 'attack') {
+            // Завершение хода возможно только если все атаки побиты
+            const allDefended = state.table.length > 0 && state.table.every((s) => !!s.defend);
+            if (!allDefended) return { ok: false, error: 'Есть непобитые атаки. Либо добавьте, либо защитник пусть возьмёт', state };
+
+            // Сбросить карты со стола (в отбой) — здесь отбой не хранится, просто очищаем стол
+            state.table = [];
+            // Раздать карты: сначала атакующему, потом защищающему
+            refillHands(state);
+            // Поменять роли
+            [state.attacker, state.defender] = [state.defender, state.attacker];
+            state.phase = 'attack';
+            state.message = 'Ход завершён. Роли сменились';
+            checkFinish(state);
+            return { ok: true, state };
+        }
+
+        if (state.phase === 'throw') {
+            // Защитник берёт все карты со стола; роли не меняются
+            moveTableToDefender(state);
+            refillHands(state);
+            // Роли сохраняются: атакующий остаётся атакующим
+            state.phase = 'attack';
+            state.message = 'Защитник взял. Атакуйте снова';
+            checkFinish(state);
+            return { ok: true, state };
+        }
+
+        return { ok: false, error: 'Сейчас нельзя завершить ход', state };
     }
 
     return { ok: false, error: 'Неизвестное действие', state };
 }
 
-// Автопереходы (например, если защищающийся побил все карты и атакующему нечего добавить)
+// Автопереходы
 function advanceIfNeeded(state: GameState): GameState {
     if (state.phase === 'attack') {
         if (!canAddAttack(state)) {
-            // Нечего добавить — атакующий должен нажать "done". Для удобства автопереход не делаем,
-            // пусть клиент жмёт кнопку "Завершить ход".
+            // Нечего добавить — атакующий должен нажать "done". Автопереход не делаем.
         }
     }
     checkFinish(state);
@@ -308,11 +335,10 @@ function checkFinish(state: GameState) {
     }
 }
 
-// Примитивная логика бота: минимальная карта для атаки/защиты
+// Логика бота: минимальная карта для атаки/защиты/докидки
 export function botDecide(state: GameState): Action | null {
     const botIdx = state.players.findIndex((p) => p.type === 'bot');
     if (botIdx < 0) return null;
-    const bot = state.players[botIdx];
 
     if (state.phase === 'attack' && botIdx === state.attacker) {
         const legals = legalAttacks(state, botIdx);
@@ -337,6 +363,7 @@ export function botDecide(state: GameState): Action | null {
         }
         const legals = legalDefenses(state, botIdx, firstOpen);
         if (legals.length === 0) {
+            // нечем биться — беру
             return { kind: 'take' };
         }
         const lowest = legals.slice().sort((a, b) => {
@@ -347,6 +374,25 @@ export function botDecide(state: GameState): Action | null {
             return RANK_ORDER[a.rank] - RANK_ORDER[b.rank];
         })[0];
         return { kind: 'defend', attackIndex: firstOpen, card: lowest };
+    }
+
+    if (state.phase === 'throw' && botIdx === state.attacker) {
+        // Бот-атакующий докидывает по возможности, иначе завершает
+        if (!canAddAttack(state)) {
+            return { kind: 'done' };
+        }
+        const legals = legalAttacks(state, botIdx);
+        if (legals.length === 0) {
+            return { kind: 'done' };
+        }
+        const lowest = legals.slice().sort((a, b) => {
+            const ta = isTrump(a, state.trumpSuit);
+            const tb = isTrump(b, state.trumpSuit);
+            if (ta !== tb) return ta ? 1 : -1;
+            if (a.suit !== b.suit) return a.suit.localeCompare(b.suit);
+            return RANK_ORDER[a.rank] - RANK_ORDER[b.rank];
+        })[0];
+        return { kind: 'attack', card: lowest };
     }
 
     return null;

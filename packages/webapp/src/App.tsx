@@ -14,16 +14,30 @@ type GameState = {
     attacker: number;
     defender: number;
     table: TableSlot[];
-    phase: 'attack' | 'defend' | 'cleanup' | 'finished';
+    phase: 'attack' | 'defend' | 'throw' | 'finished';
     winnerId?: string;
     message?: string;
 };
 
-const RANK_ORDER: Record<Rank, number> = {
-    '6': 0, '7': 1, '8': 2, '9': 3, '10': 4, 'J': 5, 'Q': 6, 'K': 7, 'A': 8,
-};
+// Глобальный WebSocket
+let WS_SINGLETON: WebSocket | null = null;
+let WS_INITIALIZED = false;
+let WS_HANDLERS_ATTACHED = false;
+
+const WS_HOST = '127.0.0.1';
+const WS_PORT = String(import.meta.env.VITE_WS_PORT ?? '8080');
+const WS_URL = `ws://${WS_HOST}:${WS_PORT}`;
+
+// Персистентный playerId
+const stored = localStorage.getItem('playerId');
+const PLAYER_ID = stored ?? crypto.randomUUID();
+if (!stored) localStorage.setItem('playerId', PLAYER_ID);
+
 function isTrump(card: Card, trump: Suit) { return card.suit === trump; }
 function canBeat(attack: Card, defend: Card, trump: Suit) {
+    const RANK_ORDER: Record<Rank, number> = {
+        '6': 0,'7': 1,'8': 2,'9': 3,'10': 4,'J': 5,'Q': 6,'K': 7,'A': 8,
+    };
     if (attack.suit === defend.suit) return RANK_ORDER[defend.rank] > RANK_ORDER[attack.rank];
     if (isTrump(defend, trump) && !isTrump(attack, trump)) return true;
     return false;
@@ -35,37 +49,41 @@ function ranksOnTable(state: GameState): Set<Rank> {
 }
 
 export function App() {
-    const wsRef = useRef<WebSocket | null>(null);
     const [you, setYou] = useState<string | null>(null);
     const [state, setState] = useState<GameState | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [wsStatus, setWsStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
-    const [wsUrl, setWsUrl] = useState<string>('');
+    const [wsUrl] = useState<string>(WS_URL);
     const [screen, setScreen] = useState<'menu' | 'game'>('menu');
 
-    const WS_HOST = '127.0.0.1';
-    const WS_PORT = String(import.meta.env.VITE_WS_PORT ?? '8080');
-    const WS_URL = `ws://${WS_HOST}:${WS_PORT}`;
+    const onOpenRef = useRef<(ev: Event) => void>();
+    const onMessageRef = useRef<(ev: MessageEvent) => void>();
+    const onErrorRef = useRef<(ev: Event) => void>();
+    const onCloseRef = useRef<(ev: CloseEvent) => void>();
 
     useEffect(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            setWsUrl(WS_URL);
-            setWsStatus('open');
-            return;
+        if (!WS_INITIALIZED) {
+            WS_INITIALIZED = true;
+            WS_SINGLETON = new WebSocket(WS_URL);
+            console.log('[webapp] creating ws', WS_URL);
         }
-        setWsUrl(WS_URL);
-        setWsStatus('connecting');
+        attachHandlers();
+        return () => {};
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-        const ws = new WebSocket(WS_URL);
-        wsRef.current = ws;
+    function attachHandlers() {
+        if (!WS_SINGLETON || WS_HANDLERS_ATTACHED) return;
 
-        ws.onopen = () => {
+        const onopen = () => {
+            console.log('[webapp] ws open', WS_URL);
             setWsStatus('open');
-            ws.send(JSON.stringify({ type: 'hello' }));
+            WS_SINGLETON!.send(JSON.stringify({ type: 'hello', playerId: PLAYER_ID }));
         };
-        ws.onmessage = (ev) => {
+        const onmessage = (ev: MessageEvent) => {
             try {
                 const data = JSON.parse(ev.data);
+                console.log('[webapp] msg:', data.type, data);
                 if (data.type === 'hello') {
                     setYou(data.you);
                 } else if (data.type === 'menu') {
@@ -77,33 +95,62 @@ export function App() {
                     setError(null);
                     setScreen('game');
                 } else if (data.type === 'error') {
+                    console.warn('[webapp] server error:', data.message);
                     setError(data.message);
                 }
             } catch {
-                // ignore
+                console.warn('[webapp] non-JSON message:', ev.data);
             }
         };
-        ws.onerror = () => setWsStatus('error');
-        ws.onclose = () => setWsStatus('closed');
+        const onerror = (ev: Event) => {
+            console.error('[webapp] ws error:', ev);
+            setWsStatus('error');
+        };
+        const onclose = (ev: CloseEvent) => {
+            console.warn('[webapp] ws closed:', ev.code, ev.reason);
+            setWsStatus('closed');
+        };
 
-        return () => { /* no-op in dev/HMR */ };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [WS_URL]);
+        onOpenRef.current = onopen;
+        onMessageRef.current = onmessage;
+        onErrorRef.current = onerror;
+        onCloseRef.current = onclose;
 
-    // Производные значения — всегда в хуках
+        WS_SINGLETON.addEventListener('open', onopen);
+        WS_SINGLETON.addEventListener('message', onmessage);
+        WS_SINGLETON.addEventListener('error', onerror);
+        WS_SINGLETON.addEventListener('close', onclose);
+
+        if (WS_SINGLETON.readyState === WebSocket.OPEN) onopen();
+        else if (WS_SINGLETON.readyState === WebSocket.CLOSED) setWsStatus('closed');
+        else setWsStatus('connecting');
+
+        WS_HANDLERS_ATTACHED = true;
+    }
+
     const meIdx = useMemo(() => (state ? state.players.findIndex((p) => p.id === you) : -1), [state, you]);
     const oppIdx = useMemo(() => {
         if (!state) return -1;
         return meIdx === 0 ? 1 : meIdx === 1 ? 0 : -1;
     }, [state, meIdx]);
-    const isMyTurnAttack = useMemo(() => !!state && meIdx >= 0 && state.phase === 'attack' && state.attacker === meIdx, [state, meIdx]);
-    const isMyTurnDefend = useMemo(() => !!state && meIdx >= 0 && state.phase === 'defend' && state.defender === meIdx, [state, meIdx]);
+
+    const isMyTurnAttack = useMemo(() =>
+            !!state && meIdx >= 0 && (state.phase === 'attack' || state.phase === 'throw') && state.attacker === meIdx,
+        [state, meIdx]
+    );
+    const isMyTurnDefend = useMemo(() =>
+            !!state && meIdx >= 0 && state.phase === 'defend' && state.defender === meIdx,
+        [state, meIdx]
+    );
+
     const attackAllowedRanks = useMemo(() => {
         if (!state) return null;
         if (state.table.length === 0) return null;
         return ranksOnTable(state);
     }, [state]);
+
     const openAttackIdx = useMemo(() => (!state ? -1 : state.table.findIndex((s) => !s.defend)), [state]);
+
     const defenseAllowedByIndex = useMemo(() => {
         if (!state) return () => false;
         if (openAttackIdx < 0) return () => false;
@@ -111,15 +158,28 @@ export function App() {
         return (card: Card) => canBeat(attackCard, card, state.trumpSuit);
     }, [state, openAttackIdx]);
 
+    const canThrow = useMemo(() => state?.phase === 'throw', [state?.phase]);
+
+    const throwSlotsLeft = useMemo(() => {
+        if (!state) return 0;
+        const defenderHand = state.players[state.defender].hand.length;
+        const onTable = state.table.length;
+        const left = defenderHand - onTable;
+        return left > 0 ? left : 0;
+    }, [state]);
+
     const send = (payload: any) => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== ws.OPEN) return;
-        ws.send(JSON.stringify(payload));
+        const ws = WS_SINGLETON;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn('[webapp] send skipped; ws not open');
+            return;
+        }
+        ws.send(JSON.stringify({ ...payload, playerId: PLAYER_ID }));
     };
     const sendAction = (action: any) => send({ type: 'action', action });
-    const startGame = () => send({ type: 'start' });
-    const resetGame = () => send({ type: 'reset' });
-    const backToMenu = () => { send({ type: 'leave' }); setScreen('menu'); setState(null); };
+    const startGame = () => { setScreen('game'); setState(null); setError(null); send({ type: 'start' }); };
+    const resetGame = () => { setScreen('game'); setState(null); setError(null); send({ type: 'reset' }); };
+    const backToMenu = () => { send({ type: 'leave' }); setScreen('menu'); setState(null); setError(null); };
     const concede = () => send({ type: 'concede' });
 
     const cardClickable = (card: Card): boolean => {
@@ -140,7 +200,6 @@ export function App() {
         else if (isMyTurnDefend) sendAction({ kind: 'defend', attackIndex: openAttackIdx, card });
     };
 
-    // Меню
     if (screen === 'menu') {
         return (
             <div className="app">
@@ -163,17 +222,47 @@ export function App() {
         );
     }
 
-    // Игра (ровная раскладка + колода по центру)
     if (!state) {
         return (
             <div className="app">
-                <div className="panel">Подключаемся... · WS: {wsUrl} · {wsStatus}</div>
+                <div className="panel header">
+                    <h1 style={{ margin: 0 }}>Durak Local</h1>
+                    <div className="status">
+                        <span className="badge">WS: {wsUrl}</span>
+                        <span className="badge">Статус: {wsStatus}</span>
+                    </div>
+                </div>
+                <div className="panel" style={{ marginTop: 12 }}>
+                    <h3 className="section-title">Загрузка состояния…</h3>
+                    <p>Игра запущена на сервере, ждём первое состояние.</p>
+                    {error && <div className="panel" style={{ marginTop: 12, background: '#ffe3e3', borderColor: '#ffb3b3', color: '#7a2222' }}>Ошибка: {error}</div>}
+                </div>
             </div>
         );
     }
 
+    if (meIdx < 0) {
+        return (
+            <div className="app">
+                <div className="panel header">
+                    <h1 style={{ margin: 0 }}>Durak Local</h1>
+                    <div className="status">
+                        <span className="badge">WS: {wsUrl}</span>
+                        <span className="badge">Статус: {wsStatus}</span>
+                    </div>
+                </div>
+                <div className="panel" style={{ marginTop: 12 }}>
+                    <h3 className="section-title">Ждём идентификацию клиента…</h3>
+                    <p>Если экран завис — перезагрузите страницу (F5). Это безопасно.</p>
+                    {error && <div className="panel" style={{ marginTop: 12, background: '#ffe3e3', borderColor: '#ffb3b3', color: '#7a2222' }}>Ошибка: {error}</div>}
+                </div>
+            </div>
+        );
+    }
+
+    const oppIdxSafe = oppIdx >= 0 ? oppIdx : (meIdx === 0 ? 1 : 0);
     const me = state.players[meIdx];
-    const opp = oppIdx >= 0 ? state.players[oppIdx] : state.players[meIdx === 0 ? 1 : 0];
+    const opp = state.players[oppIdxSafe];
     const trump = state.trumpSuit;
     const deckCount = state.deck.length;
 
@@ -182,7 +271,6 @@ export function App() {
 
     return (
         <div className="app">
-            {/* Заголовок */}
             <div className="panel header">
                 <h1 style={{ margin: 0 }}>Durak Local</h1>
                 <div className="status">
@@ -194,17 +282,16 @@ export function App() {
                 </div>
             </div>
 
-            {/* Доска: верхняя рука (рубашки), центр (колода и козырь), справа стол, нижняя рука (веер) */}
             <div className="board">
                 <div className="board-row top">
-                    <HandFan hand={opp.hand} trump={trump} clickable={false} onClick={() => {}} showBack />
+                    <HandFan hand={opp.hand} trump={trump} clickable={false} onClick={() => {}} showBack mirror />
                 </div>
 
                 <div className="board-row center">
                     <div className="center-inner">
                         <div className="center-middle">
                             <DeckStack count={deckCount} />
-                            <div className="trump-on-deck">
+                            <div className="trump-under">
                                 <CardView card={state.trumpCard} trump={trump} clickable={false} />
                             </div>
                         </div>
@@ -246,10 +333,14 @@ export function App() {
                 </div>
             </div>
 
-            {/* Сообщения и действия */}
             {state.message && (
                 <div className="panel" style={{ marginTop: 12, background: '#fffbe6', borderColor: '#ffe58f' }}>
                     {state.message}
+                    {canThrow && (
+                        <div style={{ marginTop: 8, fontSize: 14 }}>
+                            Защитник берёт. Можно докинуть ещё <b>{throwSlotsLeft}</b> {throwSlotsLeft === 1 ? 'карту' : 'карты'} по рангу, затем нажмите «Завершить ход».
+                        </div>
+                    )}
                 </div>
             )}
             {error && (
@@ -258,7 +349,6 @@ export function App() {
                 </div>
             )}
 
-            {/* Панель завершения игры */}
             {state.phase === 'finished' && (
                 <div className="panel" style={{ marginTop: 12, background: '#e6ffed', borderColor: '#abf5b5', color: '#1a7f37' }}>
                     <h3 className="section-title">Игра завершена</h3>
@@ -270,10 +360,11 @@ export function App() {
                 </div>
             )}
 
-            {/* Кнопки хода, добавлена «Сдаться» */}
             <div className="panel actions" style={{ marginTop: 12 }}>
                 <button onClick={take} disabled={!isMyTurnDefend || state.phase === 'finished'}>Взять</button>
-                <button onClick={done} disabled={!isMyTurnAttack || state.phase === 'finished'}>Завершить ход</button>
+                <button onClick={done} disabled={!isMyTurnAttack || state.phase === 'finished'}>
+                    {canThrow ? 'Завершить ход (передать защитнику)' : 'Завершить ход'}
+                </button>
                 <button onClick={concede} disabled={state.phase === 'finished'}>Сдаться</button>
             </div>
         </div>
@@ -338,6 +429,7 @@ function HandFan({
                      clickable,
                      computeClickable,
                      showBack,
+                     mirror = false, // true для оппонента
                  }: {
     hand: Card[];
     trump: Suit;
@@ -345,19 +437,33 @@ function HandFan({
     clickable: boolean;
     computeClickable?: (c: Card) => boolean;
     showBack?: boolean;
+    mirror?: boolean;
 }) {
     const n = hand.length;
-    const maxAngle = Math.min(12, 4 + n); // ровнее веер
-    const startAngle = -maxAngle;
-    const endAngle = maxAngle;
-    const angleStep = n > 1 ? (endAngle - startAngle) / (n - 1) : 0;
+
+    const maxSpreadDeg = 100;
+    const spreadDeg = Math.min(maxSpreadDeg, 15 * Math.max(0, n - 1));
+    const startDeg = -spreadDeg / 2;
+    const angleStep = n > 1 ? spreadDeg / (n - 1) : 0;
+    const radiusX = 180;
+    const lift = 46;
 
     return (
         <div className="hand-fan">
             {hand.map((c, idx) => {
-                const angle = startAngle + idx * angleStep;
-                const offsetX = idx * 24 - (n - 1) * 12; // ровная центрировка
-                const z = idx;
+                const baseDeg = startDeg + idx * angleStep;
+
+                // Для оппонента инвертируем угол и подъем
+                const deg = mirror ? -baseDeg : baseDeg;
+                const rad = (deg * Math.PI) / 180;
+
+                const tx = Math.sin(rad) * radiusX * (mirror ? -1 : 1);
+                // Наши карты выгнуты вверх (-cos); у оппонента — вниз (+cos)
+                const ty = mirror ? Math.cos(rad) * lift : -Math.cos(rad) * lift;
+
+                // Наложение: у нас правая поверх левой (z=idx); у оппонента левая поверх правой (z=n-idx)
+                const z = mirror ? (n - idx) : idx;
+
                 const canClick = computeClickable ? computeClickable(c) : clickable;
 
                 return (
@@ -367,7 +473,7 @@ function HandFan({
                         onClick={() => onClick(c)}
                         disabled={!canClick}
                         style={{
-                            transform: `translate(${offsetX}px, 0px) rotate(${angle}deg)`,
+                            transform: `translate(${tx}px, ${ty}px) rotate(${deg}deg)`,
                             zIndex: z,
                             cursor: canClick ? 'pointer' : 'default',
                         }}

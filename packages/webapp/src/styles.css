@@ -3,12 +3,12 @@
     --panel: #f8f9fa;
     --panel-text: #333;
     --border: #d0d7de;
-    --card-bg: #fff;
-    --card-border: #bbb;
-    --card-shadow: rgba(0, 0, 0, 0.2);
-    --accent: #ffe9a8;
-    --red: #d7263d;
-    --black: #191919;
+    --card-bg: #ffffff;
+    --card-border: #d9d9d9;
+    --card-shadow: rgba(0, 0, 0, 0.22);
+    --accent: #f5f5f5;
+    --red: #c62828;
+    --black: #1a1a1a;
 }
 
 html, body, #root {
@@ -19,7 +19,7 @@ body {
     margin: 0;
     background: radial-gradient(ellipse at center, #0f6c48 0%, var(--bg) 70%);
     color: #fff;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Color Emoji";
+    font-family: 'Segoe UI', system-ui, -apple-system, "Noto Color Emoji", sans-serif;
 }
 
 .app {
@@ -59,7 +59,7 @@ body {
     font-size: 12px;
 }
 
-/* Board layout: верхняя, центральная, нижняя зоны */
+/* Board layout */
 .board {
     display: grid;
     grid-template-rows: 140px auto 160px;
@@ -86,31 +86,29 @@ body {
 }
 .center-right { }
 
-/* Table slots (right side) */
+/* Table */
 .table {
     display: grid;
     grid-template-columns: repeat(2, minmax(180px, 1fr));
     gap: 12px;
 }
 .slot {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.08);
     border: 1px dashed rgba(255, 255, 255, 0.35);
     border-radius: 10px;
     padding: 10px;
 }
 
-.section-title {
-    margin: 0 0 8px;
-}
+.section-title { margin: 0 0 8px; }
 
-/* Card visuals */
+/* Card visuals — приближено к реальной колоде */
 .card {
-    width: 88px;
+    width: 86px;
     height: 124px;
-    background: var(--card-bg);
+    background: linear-gradient(145deg, var(--card-bg), #f8f8f8);
     border: 1px solid var(--card-border);
     border-radius: 10px;
-    box-shadow: 0 3px 8px var(--card-shadow);
+    box-shadow: 0 6px 14px var(--card-shadow);
     position: relative;
     user-select: none;
     transition: transform 120ms ease, box-shadow 120ms ease, outline 120ms ease, filter 120ms ease;
@@ -118,23 +116,18 @@ body {
 
 .card.face:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 12px var(--card-shadow);
+    box-shadow: 0 10px 18px var(--card-shadow);
 }
 
-.card.clickable {
-    outline: 2px solid rgba(100, 149, 237, 0.6);
-}
+.card.clickable { outline: 2px solid rgba(100, 149, 237, 0.55); }
+.card.trump.face { background: linear-gradient(145deg, #fff8e5, #fff); }
 
-.card.trump.face {
-    background: linear-gradient(145deg, var(--card-bg), var(--accent));
-}
-
-/* Card face details */
 .corner {
     position: absolute;
     font-weight: 700;
-    font-size: 16px;
+    font-size: 17px;
     line-height: 1.05;
+    letter-spacing: 0.5px;
 }
 .corner.tl { top: 8px; left: 8px; }
 .corner.br { bottom: 8px; right: 8px; text-align: right; }
@@ -143,9 +136,9 @@ body {
     position: absolute;
     left: 50%;
     top: 50%;
-    transform: translate(-50%, -48%);
-    font-size: 34px;
-    opacity: 0.9;
+    transform: translate(-50%, -50%);
+    font-size: 38px;
+    opacity: 0.92;
 }
 
 /* Card back */
@@ -157,13 +150,14 @@ body {
 /* Deck center */
 .deck-center {
     position: relative;
-    width: 88px;
+    width: 86px;
     height: 124px;
 }
 .deck-stack {
     position: relative;
-    width: 88px;
+    width: 86px;
     height: 124px;
+    z-index: 2;
 }
 .deck-stack .card.back:nth-child(1) { position: absolute; top: 0; left: 0; transform: translate(8px, 6px) rotate(-3deg); }
 .deck-stack .card.back:nth-child(2) { position: absolute; top: 0; left: 0; transform: translate(4px, 3px) rotate(2deg); }
@@ -182,53 +176,37 @@ body {
     border: 1px solid #343a40;
 }
 
-/* Trump on deck — строго справа от колоды, повернут */
-.trump-on-deck {
+/* Козырь под колодой */
+.trump-under {
     position: absolute;
     left: 50%;
     top: 50%;
-    transform: translate(56px, -4px) rotate(90deg);
+    z-index: 1;
+    transform: translate(-44px, 46px) rotate(90deg);
 }
 
-/* Hand fan */
 .hand-fan {
     position: relative;
-    width: 740px;
-    max-width: 92%;
-    height: 150px;
+    width: 900px;
+    max-width: 98%;
+    height: 240px;
     margin: 0 auto;
-    display: flex;
-    justify-content: center;
-    align-items: flex-end;
+    pointer-events: none;
 }
+
 .fan-button {
-    position: relative;
+    position: absolute;
+    bottom: 0;
+    left: 50%;
     background: transparent;
     border: none;
     padding: 0;
     margin: 0;
-}
-.fan-button:disabled {
-    filter: grayscale(45%);
-    cursor: default;
+    transform-origin: 50% 90%;
+    pointer-events: auto;
 }
 
-/* Actions */
-.actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.actions button {
-    background: #ffd43b;
-    color: #222;
-    border: 1px solid #e0b100;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-weight: 600;
-    cursor: pointer;
-}
-.actions button:disabled {
-    opacity: 0.6;
+.fan-button:disabled {
+    filter: grayscale(45%);
     cursor: default;
 }
