@@ -20,6 +20,14 @@ type GameState = {
     message?: string;
 };
 
+// Configuration for card layout
+const CARD_LAYOUT_CONFIG = {
+    radius: 350,  // Radius of the invisible circle for card positioning
+    screenWidth: 900,  // Width of the hand-fan container
+    screenHeight: 240,  // Height of the hand-fan container
+    cardHeight: 124,  // Height of a card
+};
+
 // Глобальный WebSocket
 let WS_SINGLETON: WebSocket | null = null;
 let WS_INITIALIZED = false;
@@ -442,18 +450,10 @@ function HandFan({
 }) {
     const n = hand.length;
 
-    // Configuration for circular layout
-    const layoutConfig = {
-        radius: 350,  // Configurable radius of the invisible circle
-        screenWidth: 900,  // Width of the hand-fan container
-        screenHeight: 240,  // Height of the hand-fan container
-        cardHeight: 124,  // Height of a card
-    };
-
     // Calculate positions using the circular layout function
     const positions = mirror 
-        ? calculateCircularCardLayoutMirrored(n, layoutConfig)
-        : calculateCircularCardLayout(n, layoutConfig);
+        ? calculateCircularCardLayoutMirrored(n, CARD_LAYOUT_CONFIG)
+        : calculateCircularCardLayout(n, CARD_LAYOUT_CONFIG);
 
     return (
         <div className="hand-fan">

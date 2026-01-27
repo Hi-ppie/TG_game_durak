@@ -4,7 +4,7 @@
 export interface CircularLayoutConfig {
     /**
      * Radius of the invisible circle (in pixels)
-     * Default: 400
+     * Default: 350
      */
     radius?: number;
     
@@ -70,10 +70,6 @@ export function calculateCircularCardLayout(
     // Default values
     const radius = config.radius ?? 400;
     const cardHeight = config.cardHeight ?? 124;
-    
-    // Calculate circle center
-    const centerX = config.screenWidth / 2;
-    const centerY = config.screenHeight / 2;
     
     // Maximum spread angle (in degrees) - cards won't spread beyond this
     const maxSpreadAngle = 100;
