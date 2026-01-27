@@ -441,12 +441,15 @@ function HandFan({
 }) {
     const n = hand.length;
 
-    const maxSpreadDeg = 100;
-    const spreadDeg = Math.min(maxSpreadDeg, 15 * Math.max(0, n - 1));
+    // Different arc parameters for opponent vs player
+    const maxSpreadDeg = mirror ? 70 : 120;
+    const baseStepDeg = mirror ? 9 : 12;
+    const radiusX = mirror ? 150 : 230;
+    const lift = mirror ? 28 : 70;
+
+    const spreadDeg = Math.min(maxSpreadDeg, baseStepDeg * Math.max(0, n - 1));
     const startDeg = -spreadDeg / 2;
     const angleStep = n > 1 ? spreadDeg / (n - 1) : 0;
-    const radiusX = 180;
-    const lift = 46;
 
     return (
         <div className="hand-fan">
