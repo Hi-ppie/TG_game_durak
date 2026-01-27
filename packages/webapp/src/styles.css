@@ -83,6 +83,8 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    width: 200px;
+    height: 150px;
 }
 .center-right { }
 
@@ -149,9 +151,13 @@ body {
 
 /* Deck center */
 .deck-center {
-    position: relative;
+    position: absolute;
     width: 86px;
     height: 124px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
 }
 .deck-stack {
     position: relative;
@@ -182,7 +188,7 @@ body {
     left: 50%;
     top: 50%;
     z-index: 1;
-    transform: translate(-44px, 46px) rotate(90deg);
+    transform: translate(-50%, -50%) rotate(90deg) translate(0, 43px);
 }
 
 .hand-fan {
@@ -192,6 +198,7 @@ body {
     height: 240px;
     margin: 0 auto;
     pointer-events: none;
+    z-index: 10;
 }
 
 .fan-button {
