@@ -53,6 +53,32 @@ export interface CardPosition {
 }
 
 /**
+ * Helper function to calculate common layout parameters
+ */
+function getLayoutParams(cardCount: number, config: CircularLayoutConfig) {
+    const radius = config.radius ?? 350;
+    const cardHeight = config.cardHeight ?? 124;
+    
+    // Maximum spread angle (in degrees) - cards won't spread beyond this
+    const maxSpreadAngle = 100;
+    
+    // Calculate actual spread based on number of cards
+    // For few cards, use smaller spread; for many cards, use up to maxSpreadAngle
+    const spreadAngle = Math.min(maxSpreadAngle, 15 * Math.max(0, cardCount - 1));
+    
+    // Starting angle (negative so cards spread symmetrically)
+    const startAngle = -spreadAngle / 2;
+    
+    // Angular step between cards
+    const angleStep = cardCount > 1 ? spreadAngle / (cardCount - 1) : 0;
+    
+    // Distance from circle center to card center
+    const distanceFromCenter = radius + cardHeight / 2;
+    
+    return { startAngle, angleStep, distanceFromCenter };
+}
+
+/**
  * Calculates card positions for player's hand (bottom of screen).
  * Cards are positioned at the bottom of a circle, curving upward toward the player.
  * 
@@ -68,23 +94,7 @@ export function calculateCircularCardLayout(
         return [];
     }
     
-    // Default values
-    const radius = config.radius ?? 400;
-    const cardHeight = config.cardHeight ?? 124;
-    
-    // Maximum spread angle (in degrees) - cards won't spread beyond this
-    const maxSpreadAngle = 100;
-    
-    // Calculate actual spread based on number of cards
-    // For few cards, use smaller spread; for many cards, use up to maxSpreadAngle
-    const spreadAngle = Math.min(maxSpreadAngle, 15 * Math.max(0, cardCount - 1));
-    
-    // Starting angle (negative so cards spread symmetrically around bottom)
-    const startAngle = -spreadAngle / 2;
-    
-    // Angular step between cards
-    const angleStep = cardCount > 1 ? spreadAngle / (cardCount - 1) : 0;
-    
+    const { startAngle, angleStep, distanceFromCenter } = getLayoutParams(cardCount, config);
     const positions: CardPosition[] = [];
     
     for (let i = 0; i < cardCount; i++) {
@@ -94,13 +104,8 @@ export function calculateCircularCardLayout(
         // Convert to radians
         const angleRad = (angleDeg * Math.PI) / 180;
         
-        // Calculate position on the circle
-        // For player: circle center is ABOVE the cards (cards at bottom of circle)
-        // The bottom edge of the card should touch the circle from below
-        // So we position the card center at -(radius + cardHeight/2) below the circle center
-        const distanceFromCenter = radius + cardHeight / 2;
-        
         // Calculate card center position
+        // For player: circle center is ABOVE the cards (cards at bottom of circle)
         // Angle 0 is at the bottom, positive angles go counterclockwise
         const cardCenterX = Math.sin(angleRad) * distanceFromCenter;
         // Positive Y moves down, so we use positive value to place cards below circle center
@@ -111,7 +116,6 @@ export function calculateCircularCardLayout(
         const y = cardCenterY;
         
         // Rotation should match the tangent direction
-        // The tangent at angle θ is perpendicular to the radius
         // For cards at bottom of circle curving upward, rotation = angle
         const rotation = angleDeg;
         
@@ -140,22 +144,7 @@ export function calculateCircularCardLayoutMirrored(
         return [];
     }
     
-    // Default values
-    const radius = config.radius ?? 400;
-    const cardHeight = config.cardHeight ?? 124;
-    
-    // Maximum spread angle (in degrees) - cards won't spread beyond this
-    const maxSpreadAngle = 100;
-    
-    // Calculate actual spread based on number of cards
-    const spreadAngle = Math.min(maxSpreadAngle, 15 * Math.max(0, cardCount - 1));
-    
-    // Starting angle (negative so cards spread symmetrically around top)
-    const startAngle = -spreadAngle / 2;
-    
-    // Angular step between cards
-    const angleStep = cardCount > 1 ? spreadAngle / (cardCount - 1) : 0;
-    
+    const { startAngle, angleStep, distanceFromCenter } = getLayoutParams(cardCount, config);
     const positions: CardPosition[] = [];
     
     for (let i = 0; i < cardCount; i++) {
@@ -165,13 +154,8 @@ export function calculateCircularCardLayoutMirrored(
         // Convert to radians
         const angleRad = (angleDeg * Math.PI) / 180;
         
-        // Calculate position on the circle
-        // For opponent: circle center is BELOW the cards (cards at top of circle)
-        // The bottom edge of the card should touch the circle from above
-        const distanceFromCenter = radius + cardHeight / 2;
-        
         // Calculate card center position
-        // For opponent, we flip: cards spread left-to-right but curve downward
+        // For opponent: circle center is BELOW the cards (cards at top of circle)
         const cardCenterX = Math.sin(angleRad) * distanceFromCenter;
         // Negative Y to place cards above the circle center (toward top of screen)
         const cardCenterY = -Math.cos(angleRad) * distanceFromCenter;
