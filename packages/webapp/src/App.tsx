@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { calculateCircularCardLayout, calculateCircularCardLayoutMirrored } from './cardLayout';
 
 type Suit = '♠' | '♥' | '♦' | '♣';
 type Rank = '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K' | 'A';
@@ -17,6 +18,14 @@ type GameState = {
     phase: 'attack' | 'defend' | 'throw' | 'finished';
     winnerId?: string;
     message?: string;
+};
+
+// Configuration for card layout
+const CARD_LAYOUT_CONFIG = {
+    radius: 350,  // Radius of the invisible circle for card positioning
+    screenWidth: 900,  // Width of the hand-fan container
+    screenHeight: 240,  // Height of the hand-fan container
+    cardHeight: 124,  // Height of a card
 };
 
 // Глобальный WebSocket
@@ -441,29 +450,15 @@ function HandFan({
 }) {
     const n = hand.length;
 
-    const maxSpreadDeg = 100;
-    const spreadDeg = Math.min(maxSpreadDeg, 15 * Math.max(0, n - 1));
-    const startDeg = -spreadDeg / 2;
-    const angleStep = n > 1 ? spreadDeg / (n - 1) : 0;
-    const radiusX = 180;
-    const lift = 46;
+    // Calculate positions using the circular layout function
+    const positions = mirror 
+        ? calculateCircularCardLayoutMirrored(n, CARD_LAYOUT_CONFIG)
+        : calculateCircularCardLayout(n, CARD_LAYOUT_CONFIG);
 
     return (
         <div className="hand-fan">
             {hand.map((c, idx) => {
-                const baseDeg = startDeg + idx * angleStep;
-
-                // Для оппонента инвертируем угол и подъем
-                const deg = mirror ? -baseDeg : baseDeg;
-                const rad = (deg * Math.PI) / 180;
-
-                const tx = Math.sin(rad) * radiusX * (mirror ? -1 : 1);
-                // Наши карты выгнуты вверх (-cos); у оппонента — вниз (+cos)
-                const ty = mirror ? Math.cos(rad) * lift : -Math.cos(rad) * lift;
-
-                // Наложение: у нас правая поверх левой (z=idx); у оппонента левая поверх правой (z=n-idx)
-                const z = mirror ? (n - idx) : idx;
-
+                const pos = positions[idx];
                 const canClick = computeClickable ? computeClickable(c) : clickable;
 
                 return (
@@ -473,8 +468,8 @@ function HandFan({
                         onClick={() => onClick(c)}
                         disabled={!canClick}
                         style={{
-                            transform: `translate(${tx}px, ${ty}px) rotate(${deg}deg)`,
-                            zIndex: z,
+                            transform: `translate(${pos.x}px, ${pos.y}px) rotate(${pos.rotation}deg)`,
+                            zIndex: pos.zIndex,
                             cursor: canClick ? 'pointer' : 'default',
                         }}
                     >
