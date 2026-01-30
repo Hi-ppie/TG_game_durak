@@ -281,55 +281,56 @@ export function App() {
                     <span className="badge">Ходит: {state.players[state.attacker].name}</span>
                 </div>
             </div>
+            <div className="board-wrapper">
+                <div className="board board-scaled">
+                    <div className="board-row top">
+                        <HandFan hand={opp.hand} trump={trump} clickable={false} onClick={() => {}} showBack mirror />
+                    </div>
 
-            <div className="board">
-                <div className="board-row top">
-                    <HandFan hand={opp.hand} trump={trump} clickable={false} onClick={() => {}} showBack mirror />
-                </div>
-
-                <div className="board-row center">
-                    <div className="center-inner">
-                        <div className="center-middle">
-                            <DeckStack count={deckCount} />
-                            <div className="trump-under">
-                                <CardView card={state.trumpCard} trump={trump} clickable={false} />
+                    <div className="board-row center">
+                        <div className="center-inner">
+                            <div className="center-middle">
+                                <DeckStack count={deckCount} />
+                                <div className="trump-under">
+                                    <CardView card={state.trumpCard} trump={trump} clickable={false} />
+                                </div>
                             </div>
-                        </div>
-                        <div className="center-right">
-                            <div className="panel">
-                                <h3 className="section-title">Стол</h3>
-                                <div className="table">
-                                    {state.table.map((slot, i) => (
-                                        <div key={i} className="slot">
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                <span>Атака:</span>
-                                                <CardView card={slot.attack} trump={trump} clickable={false} />
+                            <div className="center-right">
+                                <div className="table-surface">
+                                    <h3 className="section-title">Стол</h3>
+                                    <div className="table">
+                                        {state.table.map((slot, i) => (
+                                            <div key={i} className="slot">
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    <span>Атака:</span>
+                                                    <CardView card={slot.attack} trump={trump} clickable={false} />
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                                                    <span>Защита:</span>
+                                                    {slot.defend ? (
+                                                        <CardView card={slot.defend} trump={trump} clickable={false} />
+                                                    ) : (
+                                                        <span>—</span>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                                                <span>Защита:</span>
-                                                {slot.defend ? (
-                                                    <CardView card={slot.defend} trump={trump} clickable={false} />
-                                                ) : (
-                                                    <span>—</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {state.table.length === 0 && <div className="slot">Стол пуст</div>}
+                                        ))}
+                                        {state.table.length === 0 && <div className="slot">Стол пуст</div>}
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div className="board-row bottom">
-                    <HandFan
-                        hand={me.hand}
-                        trump={trump}
-                        clickable={state.phase !== 'finished'}
-                        onClick={(c) => onCardClick(c)}
-                        computeClickable={(c) => state.phase !== 'finished' && cardClickable(c)}
-                    />
+                    <div className="board-row bottom">
+                        <HandFan
+                            hand={me.hand}
+                            trump={trump}
+                            clickable={state.phase !== 'finished'}
+                            onClick={(c) => onCardClick(c)}
+                            computeClickable={(c) => state.phase !== 'finished' && cardClickable(c)}
+                        />
+                    </div>
                 </div>
             </div>
 
